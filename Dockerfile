@@ -1,4 +1,4 @@
-FROM golang:bullseye as compile-lkd
+FROM debian:bullseye as compile-lkd
 MAINTAINER Marios Andreopoulos <marios@landoop.com>
 
 RUN apt-get update \
@@ -8,11 +8,9 @@ RUN apt-get update \
 	 file \
     && rm -rf /var/lib/apt/lists/* \
     && echo "progress = dot:giga" | tee /etc/wgetrc \
-    && mkdir -p /mnt /opt /data \
-    && go install github.com/andmarios/duphard@latest \
-    && go install gitlab.com/andmarios/checkport@latest \
-    && go install github.com/andmarios/quickcert@latest \
-    && ln -s  /go/bin/duphard /bin/duphard
+    && mkdir -p /mnt /opt /data
+    # && wget https://github.com/andmarios/duphard/releases/download/v1.0/duphard -O /bin/duphard \
+    # && chmod +x /bin/duphard
 
 SHELL ["/bin/bash", "-c"]
 WORKDIR /
@@ -89,10 +87,8 @@ RUN wget $DEVARCH_USER $DEVARCH_PASS "${STREAM_REACTOR_URL}" -O /stream-reactor.
        done \
     && rm -f /opt/landoop/connectors/stream-reactor/*/*{javadoc,scaladoc,sources}.jar \
     && echo "plugin.path=/opt/landoop/connectors/stream-reactor,/opt/landoop/connectors/third-party" \
-            >> /opt/landoop/kafka/etc/schema-registry/connect-avro-distributed.properties
-# RUN echo "plugin.path=/opt/landoop/connectors/stream-reactor,/opt/landoop/connectors/third-party" \
-#        >> /opt/landoop/kafka/etc/schema-registry/connect-avro-distributed.properties \
-#     && mkdir -p /opt/landoop/connectors/stream-reactor
+            >> /opt/landoop/kafka/etc/schema-registry/connect-avro-distributed.properties \
+    && rm -rf /opt/landoop/connectors/stream-reactor/kafka-connect-{elastic6,elastic7,hive} # Temporary mitigation for log4shell (removing connectors with offending libs)
 
 # Add Secrets Provider
 ARG SECRET_PROVIDER_VERSION=2.1.6
@@ -128,14 +124,15 @@ RUN wget $DEVARCH_USER $DEVARCH_PASS "$KAFKA_CONNECT_ELASTICSEARCH_URL" \
     && rm -rf /opt/kafka-connect-elasticsearch.tar.gz
 
 ## Kafka Connect HDFS
-ARG KAFKA_CONNECT_HDFS_VERSION=10.0.2-lkd-r0
-ARG KAFKA_CONNECT_HDFS_URL="${ARCHIVE_SERVER}/lkd/packages/connectors/third-party/kafka-connect-hdfs/kafka-connect-hdfs-${KAFKA_CONNECT_HDFS_VERSION}.tar.gz"
-RUN wget $DEVARCH_USER $DEVARCH_PASS "$KAFKA_CONNECT_HDFS_URL" \
-         -O /opt/kafka-connect-hdfs.tar.gz \
-    && mkdir -p /opt/landoop/connectors/third-party/ \
-    && tar --no-same-owner -xf /opt/kafka-connect-hdfs.tar.gz \
-           -C /opt/landoop/connectors/third-party/ \
-    && rm -rf /opt/kafka-connect-hdfs.tar.gz
+# Disable until CVE-2021-44228 is addressed
+# ARG KAFKA_CONNECT_HDFS_VERSION=10.0.2-lkd-r0
+# ARG KAFKA_CONNECT_HDFS_URL="${ARCHIVE_SERVER}/lkd/packages/connectors/third-party/kafka-connect-hdfs/kafka-connect-hdfs-${KAFKA_CONNECT_HDFS_VERSION}.tar.gz"
+# RUN wget $DEVARCH_USER $DEVARCH_PASS "$KAFKA_CONNECT_HDFS_URL" \
+#          -O /opt/kafka-connect-hdfs.tar.gz \
+#     && mkdir -p /opt/landoop/connectors/third-party/ \
+#     && tar --no-same-owner -xf /opt/kafka-connect-hdfs.tar.gz \
+#            -C /opt/landoop/connectors/third-party/ \
+#     && rm -rf /opt/kafka-connect-hdfs.tar.gz
 
 # Kafka Connect S3
 ARG KAFKA_CONNECT_S3_VERSION=10.0.0-lkd-r0
@@ -191,7 +188,7 @@ RUN mkdir -p /opt/landoop/connectors/third-party/kafka-connect-debezium-{mongodb
     && rm -rf /debezium-{mongodb,mysql,postgres,sqlserver}.tgz
 
 # Kafka Connect Splunk
-ARG KAFKA_CONNECT_SPLUNK_VERSION="1.1.0"
+ARG KAFKA_CONNECT_SPLUNK_VERSION="2.0.4"
 ARG KAFKA_CONNECT_SPLUNK_URL="https://github.com/splunk/kafka-connect-splunk/releases/download/v${KAFKA_CONNECT_SPLUNK_VERSION}/splunk-kafka-connect-v${KAFKA_CONNECT_SPLUNK_VERSION}.jar"
 RUN mkdir -p /opt/landoop/connectors/third-party/kafka-connect-splunk \
     && wget "$KAFKA_CONNECT_SPLUNK_URL" \
@@ -307,7 +304,7 @@ RUN echo    "LKD_VERSION=${LKD_VERSION}"                               | tee -a 
 
 # duphard (replace duplicates with hard links) and create archive
 # We run as two separate commands because otherwise the build fails in docker hub (but not locally)
-RUN duphard -d=0 /opt/landoop
+# RUN duphard -d=0 /opt/landoop
 RUN tar -czf /LKD-${LKD_VERSION}.tar.gz \
            --owner=root \
            --group=root \
@@ -326,9 +323,6 @@ CMD ["bash", "-c", "tar -czf /mnt/LKD-${LKD_VERSION}.tar.gz -C /opt landoop; cho
 FROM debian:bullseye-slim
 MAINTAINER Marios Andreopoulos <marios@landoop.com>
 COPY --from=compile-lkd /opt /opt
-COPY --from=compile-lkd /go/bin/checkport /usr/local/bin/checkport
-COPY --from=compile-lkd /go/bin/quickcert /usr/local/bin/quickcert
-
 
 # Update, install tooling and some basic setup
 RUN apt-get update \
@@ -370,10 +364,15 @@ WORKDIR /
 # caddy    : an excellent web server we use to serve fast-data-dev UI, proxy various REST
 #            endpoints, etc
 #            https://github.com/mholt/caddy
+ARG CHECKPORT_URL="https://gitlab.com/andmarios/checkport/uploads/3903dcaeae16cd2d6156213d22f23509/checkport"
+ARG QUICKCERT_URL="https://github.com/andmarios/quickcert/releases/download/1.0/quickcert-1.0-linux-amd64-alpine"
 ARG GLIBC_INST_VERSION="2.32-r0"
-ARG CADDY_URL=https://github.com/caddyserver/caddy/releases/download/v0.11.5/caddy_v0.11.5_linux_arm64.tar.gz
-ARG GOTTY_URL=https://github.com/yudai/gotty/releases/download/v1.0.1/gotty_linux_arm.tar.gz
-RUN wget "$CADDY_URL" -O /caddy.tgz \
+ARG CADDY_URL=https://github.com/caddyserver/caddy/releases/download/v0.11.5/caddy_v0.11.5_linux_amd64.tar.gz
+ARG GOTTY_URL=https://github.com/yudai/gotty/releases/download/v1.0.1/gotty_linux_amd64.tar.gz
+RUN wget "$CHECKPORT_URL" -O /usr/local/bin/checkport \
+    && wget "$QUICKCERT_URL" -O /usr/local/bin/quickcert \
+    && chmod 0755 /usr/local/bin/quickcert /usr/local/bin/checkport \
+    && wget "$CADDY_URL" -O /caddy.tgz \
     && mkdir -p /opt/caddy \
     && tar xzf /caddy.tgz -C /opt/caddy \
     && rm -f /caddy.tgz \

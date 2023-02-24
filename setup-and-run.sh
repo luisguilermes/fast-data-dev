@@ -497,11 +497,11 @@ fi
 for port in $PORTS; do
     if [[ $port == 0 ]]; then
         continue
-    elif ! /usr/local/bin/checkport -port "$port"; then
-        echo "Could not successfully bind to port $port. Maybe some other service"
-        echo "in your system is using it? Please free the port and try again."
-        echo "Exiting."
-        exit 1
+    # elif ! /usr/local/bin/checkport -port "$port"; then
+    #     echo "Could not successfully bind to port $port. Maybe some other service"
+    #     echo "in your system is using it? Please free the port and try again."
+    #     echo "Exiting."
+    #     exit 1
     fi
 done
 
